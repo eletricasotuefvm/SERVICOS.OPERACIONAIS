@@ -140,11 +140,20 @@ body.on-check .fab{display:block}
 @media print{.top,.bottom,.no-print,.fab{display:none!important}body{padding:0;background:#fff}main{max-width:none;padding:0}
  .card{break-inside:avoid;box-shadow:none;border:0;padding:0}.rp{border:0;padding:0}.page{display:none!important}.page.active{display:block!important}
  .rp h2{-webkit-print-color-adjust:exact;print-color-adjust:exact}.ncbox img,.fig img{max-height:170px}}
+
+/* v4.2 */
+.top{padding-top:calc(14px + env(safe-area-inset-top,0px))}
+.bottom{padding-bottom:env(safe-area-inset-bottom,0px)}
+body{padding-bottom:calc(82px + env(safe-area-inset-bottom,0px))}
+.fab{bottom:calc(92px + env(safe-area-inset-bottom,0px))}
+.lotoj{min-height:60px;margin-top:6px;border-color:#f79009}
+.print-only{display:none}
+@media print{body.pb .page,body.pb .page.active,body.pb .fab{display:none!important}body.pb #blqPrint{display:block!important}#blqPrint table{font-size:9.5px}}
 </style>
 </head>
 <body>
 <header class="top">
-  <h1>⚡ DiagElétrica Vale <span class="badge">v4.1</span></h1>
+  <h1>⚡ DiagElétrica Vale <span class="badge">v4.3</span></h1>
   <p>Relatório de campo p/ adequações elétricas • NR-10 • NBR 5410/5419 • PNR Vale • RAC 10 (PRO-041951)</p>
   <p id="saveStatus" style="font-size:10.5px;margin:3px 0 0;color:#d7f0ef"></p>
 </header>
@@ -157,6 +166,7 @@ body.on-check .fab{display:block}
     <div class="actions" style="margin-top:10px">
       <button class="btn" id="newBtn">+ Iniciar inspeção</button>
       <button class="btn secondary" id="resumeBtn">Continuar atual</button>
+      <button class="btn secondary" id="importBtn">📂 Restaurar backup (.json)</button><input type="file" id="importFile" accept=".json,application/json" style="display:none">
     </div>
     <div id="restoreInfo" class="notice" style="margin-top:10px;display:none"></div>
   </div>
@@ -301,7 +311,7 @@ body.on-check .fab{display:block}
     <h3>Imprimir / exportar / enviar</h3>
     <label>E-mail de destino<input id="blqEmail" type="email" placeholder="engenharia@vale.com"></label>
     <div class="actions">
-      <button class="btn" onclick="window.print()">📄 Imprimir / salvar PDF</button>
+      <button class="btn" onclick="printBlq()">📄 Imprimir / salvar PDF</button>
       <button class="btn amar" onclick="exportBlqCSV()">💾 Exportar Excel (.csv)</button>
       <button class="btn green" onclick="sendMailBlq()">✉️ Enviar por e-mail</button>
     </div>
@@ -354,6 +364,8 @@ body.on-check .fab{display:block}
   </div>
   <div id="report"></div>
   <div class="card no-print"><h2>10. Enviar</h2>
+    <div id="sheetsBox" class="danger"></div>
+    <button class="btn green" id="sheetsBtn" style="width:100%;margin:8px 0 12px" onclick="sendSheets()">📤 Enviar relatório (.xlsx) — obrigatório</button>
     <label>E-mail de destino<input id="email" type="email" autocomplete="email" placeholder="engenharia@vale.com"></label>
     <label>Mensagem<textarea id="emailMsg">Segue o relatório de diagnóstico elétrico de campo para análise das adequações.</textarea></label>
     <div class="actions">
@@ -371,6 +383,7 @@ body.on-check .fab{display:block}
     <button class="btn red" style="width:100%;margin-top:6px" onclick="finishClean()">🧹 Finalizar e limpar inspeção</button>
   </div>
 </section>
+<div id="blqPrint" class="print-only"></div>
 </main>
 <nav class="bottom">
   <button data-page="home"><span>⌂</span>Início</button>
@@ -384,13 +397,17 @@ body.on-check .fab{display:block}
 </nav>
 <script>
 /* ================= ESTADO ================= */
-const APP_VER="4.1";
+const APP_VER="4.3";
 function freshState(){return{norm:"NR10",items:{},photos:[],med:[],actions:[],costs:[],loto:{},blq:[],ui:{autoPlan:true,closed:{}},meta:{}}}
 const S=freshState();
 const STORAGE_KEY="diagEletricaVale_v2_state";
 const FIELD_IDS=["cliente","local","resp","matricula","crea","contrato","data","docNum","tipo","tensao","fonteT","intervencao","obs","email","emailMsg","blqLocal","blqData","blqResp","blqContratada","blqPlanta","blqFase","blqEmail"];
 const KEEP_IDS=["cliente","resp","matricula","crea","email","emailMsg"];
 const MAX_PHOTOS=40;
+/* ===== ENVIO OBRIGATÓRIO AO GOOGLE SHEETS (v4.3) — preencha após implantar o Apps Script ===== */
+const SHEETS_URL="";            // URL do Web App (termina em /exec)
+const SHEETS_TOKEN="Tubarao2026";          // mesmo token definido no Code.gs
+const SHEETS_GATE_DELIVERY=true; // true: PDF e e-mail só liberam após o envio ao Sheets
 /* ===== 6 PASSOS (NR-10 10.5.1 / RAC 04) ===== */
 const LOTO=[
  ["Seccionamento","Descontinuidade elétrica obtida acionando dispositivo apropriado.","NR-10 10.5.1.a"],
@@ -415,7 +432,7 @@ NR10:[
  ["Rotas de fuga desobstruídas e portas de subestação identificadas","PNR-000127 • PRO-041951 item 16"],
  ["PTS emitida para atividades aplicáveis (ex.: área classificada)","PNR-000031 • PRO-041951 item 11.4"],
  ["Análise Preliminar de Risco (APR) elaborada e assinada antes da atividade","NR-10 10.2.8 • PRO-041951"],
- ["Reciclagem/capacitação NR-10 dos executantes dentro da validade (máx. 2 anos)","NR-10 10.8.6"],
+ ["Reciclagem/capacitação NR-10 dos executantes dentro da validade (máx. 2 anos)","NR-10 10.8.8.2"],
  ["Sinalização de advertência de risco de choque elétrico afixada nos pontos de acesso","NR-10 10.2.8"],
  ["Cadeados/dispositivos de bloqueio individual e etiquetas disponíveis no local","RAC 04 • PRO-041951"],
  ["Distâncias de segurança da zona controlada/de risco respeitadas","NR-10 Anexo II"],
@@ -524,17 +541,34 @@ function pad2(n){return String(n).padStart(2,"0")}
 /* ===== PERSISTÊNCIA LOCAL (autosave) ===== */
 let _saveTimer=null,_blockSave=false;
 function scheduleSave(){clearTimeout(_saveTimer);_saveTimer=setTimeout(save,350)}
-function save(){
+function writeLS(){
  if(_blockSave)return;
  try{
   const fields={};FIELD_IDS.forEach(id=>{const el=$(id);if(el)fields[id]=el.value});
-  localStorage.setItem(STORAGE_KEY,JSON.stringify({S,fields,ts:new Date().toISOString(),ver:APP_VER}));
+  localStorage.setItem(STORAGE_KEY,JSON.stringify({S:lsState(),fields,ts:new Date().toISOString(),ver:APP_VER}));
   const el=$("saveStatus");if(el)el.textContent="Salvo automaticamente neste aparelho às "+new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
  }catch(err){
   const el=$("saveStatus");if(el)el.textContent="⚠️ Não foi possível salvar automaticamente (armazenamento cheio). Exporte o .json e reduza o nº de fotos.";
   console.warn("Falha ao salvar automaticamente:",err);
  }
 }
+/* ===== FOTOS: IndexedDB (v4.2) — localStorage guarda só metadados ===== */
+let _idbState="pending",_pv=0,_pvSaved=0,_persisting=false,_again=false,_pend=0,_limAt=0;
+function markPhotos(){_pv++}
+function lsState(){return(_idbState==="ok"&&_pv===_pvSaved)?Object.assign({},S,{photos:S.photos.map(p=>({name:p.name,ts:p.ts}))}):S}
+function idbOpen(){return new Promise((res,rej)=>{if(!window.indexedDB)return rej(new Error("sem IndexedDB"));const r=indexedDB.open("diagEletricaVale",1);r.onupgradeneeded=()=>r.result.createObjectStore("kv");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error("bloqueado"))})}
+function idbRun(mode,fn){return idbOpen().then(db=>new Promise((res,rej)=>{const tx=db.transaction("kv",mode);const rq=fn(tx.objectStore("kv"));tx.oncomplete=()=>{db.close();res(rq&&rq.result)};tx.onerror=tx.onabort=()=>{db.close();rej(tx.error)}}))}
+const idbGet=k=>idbRun("readonly",s=>s.get(k));
+const idbSet=(k,v)=>idbRun("readwrite",s=>s.put(v,k));
+function persistPhotos(){return idbSet("photos",S.photos.map(p=>({name:p.name,url:p.url,ts:p.ts})))}
+function save(){
+ if(_blockSave)return;
+ if(_idbState==="ok"&&_pv!==_pvSaved){
+  if(_persisting){_again=true;return}
+  _persisting=true;const v=_pv;
+  persistPhotos().then(()=>{_pvSaved=v;return true},()=>false).then(ok=>{_persisting=false;writeLS();if(_again&&ok){_again=false;save()}else _again=false});
+  return}
+ writeLS()}
 function loadSaved(){try{const raw=localStorage.getItem(STORAGE_KEY);return raw?JSON.parse(raw):null}catch(err){console.warn(err);return null}}
 function applySaved(data){
  if(!data||!data.S)return;
@@ -543,24 +577,26 @@ function applySaved(data){
  ["items","loto","meta"].forEach(k=>{if(!S[k]||typeof S[k]!=="object")S[k]={}});
  Object.keys(data.fields||{}).forEach(id=>{const el=$(id);if(el)el.value=data.fields[id]});
 }
-function hardReset(payload){
+function hardReset(payload,keepPhotos){
  clearTimeout(_saveTimer);_blockSave=true;
  try{if(payload)localStorage.setItem(STORAGE_KEY,JSON.stringify(payload));else localStorage.removeItem(STORAGE_KEY)}catch(err){}
- location.reload();
+ if(keepPhotos){location.reload();return}const rl=()=>location.reload();Promise.race([idbSet("photos",[]),new Promise(r=>setTimeout(r,1000))]).then(rl,rl);
 }
 function go(id){document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));$(id).classList.add("active");
  document.querySelectorAll(".bottom button").forEach(b=>b.classList.toggle("active",b.dataset.page===id));
  document.body.classList.toggle("on-check",id==="check");if(id==="check"){renderTabs();renderChecklist()}
  if(id==="resultado")renderResult();if(id==="relatorio")buildReport();window.scrollTo({top:0,behavior:"smooth"})}
 document.querySelectorAll(".bottom button").forEach(b=>b.onclick=()=>go(b.dataset.page));
-$("newBtn").onclick=()=>{if(confirm("Iniciar nova inspeção e apagar os dados atuais? Esta ação não pode ser desfeita."))hardReset(null)};
+$("newBtn").onclick=()=>{if(SHEETS_URL&&!sheetsOk()&&allItems().length)return alert("Envio obrigatório pendente: envie o relatório (.xlsx) da inspeção atual (aba Relatório) antes de iniciar outra.");if(confirm("Iniciar nova inspeção e apagar os dados atuais? Esta ação não pode ser desfeita."))hardReset(null)};
 $("resumeBtn").onclick=()=>go("dados");
 document.querySelector("main").addEventListener("input",e=>{if(FIELD_IDS.includes(e.target.id))scheduleSave()});
 document.querySelector("main").addEventListener("change",e=>{if(FIELD_IDS.includes(e.target.id))save()});
 /* ===== FOTOS ===== */
 function photoAdded(file,onDone){
- if(S.photos.length>=MAX_PHOTOS)return alert("Limite de "+MAX_PHOTOS+" fotos por inspeção atingido. Gere o relatório/exporte e inicie um novo registro se precisar de mais evidências.");
+ if(S.photos.length+_pend>=MAX_PHOTOS){if(Date.now()-_limAt>1500){_limAt=Date.now();alert("Limite de "+MAX_PHOTOS+" fotos por inspeção atingido. Gere o relatório/exporte e inicie um novo registro se precisar de mais evidências.")}return}
  if(!file.type||!file.type.startsWith("image/"))return alert("Arquivo ignorado (não é uma imagem): "+file.name);
+ _pend++;
+ const add=url=>{_pend--;S.photos.push({name:file.name,url,ts:new Date().toISOString()});markPhotos();renderPhotos();if(onDone)onDone(S.photos.length-1)};
  const reader=new FileReader();
  reader.onload=e=>{
   const img=new Image();
@@ -570,33 +606,29 @@ function photoAdded(file,onDone){
    const cv=document.createElement("canvas");cv.width=w;cv.height=h;
    cv.getContext("2d").drawImage(img,0,0,w,h);
    let dataUrl;try{dataUrl=cv.toDataURL("image/jpeg",0.7)}catch(err){dataUrl=e.target.result}
-   S.photos.push({name:file.name,url:dataUrl,ts:new Date().toISOString()});
-   renderPhotos();if(onDone)onDone(S.photos.length-1);
-  };
-  img.onerror=()=>{S.photos.push({name:file.name,url:e.target.result,ts:new Date().toISOString()});renderPhotos();if(onDone)onDone(S.photos.length-1)};
-  img.src=e.target.result;
- };
- reader.onerror=()=>alert("Não foi possível ler o arquivo: "+file.name);
- reader.readAsDataURL(file);
-}
+   add(dataUrl)};
+  img.onerror=()=>add(e.target.result);
+  img.src=e.target.result};
+ reader.onerror=()=>{_pend--;alert("Não foi possível ler o arquivo: "+file.name)};
+ reader.readAsDataURL(file)}
 $("camera").onchange=e=>{if(e.target.files[0])photoAdded(e.target.files[0]);e.target.value=""};
 $("gallery").onchange=e=>{[...e.target.files].slice(0,MAX_PHOTOS).forEach(f=>photoAdded(f));e.target.value=""};
 function shiftIdx(o,i){if(o&&o.photoIdx!==undefined&&o.photoIdx!==null&&o.photoIdx!==""){const p=Number(o.photoIdx);if(p===i)o.photoIdx="";else if(p>i)o.photoIdx=p-1}}
 function removePhoto(i){
  if(!confirm("Excluir esta foto? Os vínculos dela com itens do checklist e da matriz de bloqueio serão ajustados."))return;
- S.photos.splice(i,1);
+ S.photos.splice(i,1);markPhotos();
  Object.values(S.items).forEach(it=>shiftIdx(it,i));S.blq.forEach(b=>shiftIdx(b,i));
  renderPhotos();renderChecklist();renderBlqList();save();
 }
 function photoUsers(i){const u=[];Object.keys(S.items).forEach(k=>{const it=S.items[k];if(it&&it.status&&it.photoIdx!==""&&it.photoIdx!==undefined&&Number(it.photoIdx)===i){const[n,x]=k.split("_");if(DB[n]&&DB[n][x])u.push(NORMS[n]+" item "+(Number(x)+1))}});
  S.blq.forEach(b=>{if(b.photoIdx!==""&&b.photoIdx!==undefined&&Number(b.photoIdx)===i)u.push("Bloqueio "+b.equip)});return u}
-function renderPhotos(){$("photos").innerHTML=S.photos.map((p,i)=>`<div class="ev"><b>Foto ${i+1}</b> — ${esc(p.name)}<img src="${p.url}" alt="Evidência ${i+1}"><button class="btn red" style="margin-top:7px;min-height:38px" onclick="removePhoto(${i})">Excluir</button></div>`).join("");renderBlqFotoSelect();if($("check").classList.contains("active"))renderChecklist();save()}
+function renderPhotos(){$("photos").innerHTML=S.photos.map((p,i)=>`<div class="ev"><b>Foto ${i+1}</b> — ${esc(p.name)}<img src="${p.url||""}" alt="Evidência ${i+1}"><button class="btn red" style="margin-top:7px;min-height:38px" onclick="removePhoto(${i})">Excluir</button></div>`).join("");renderBlqFotoSelect();if($("check").classList.contains("active"))renderChecklist();save()}
 function photoOptions(sel){return '<option value="">Sem foto associada</option>'+S.photos.map((p,i)=>`<option value="${i}" ${String(sel)===String(i)?"selected":""}>Foto ${i+1} — ${esc(p.name)}</option>`).join("")}
 /* ===== 6 PASSOS ===== */
 function renderLoto(){$("loto-steps").innerHTML=LOTO.map((s,i)=>{const k="L"+i,v=S.loto[k]||"";
  return `<div class="step ${v==='OK'?'done':''}"><div class="n">${i+1}</div><div style="flex:1"><strong>${esc(s[0])}</strong><div class="ref">${esc(s[2])}</div><div class="muted" style="margin:4px 0">${esc(s[1])}</div>
- <select data-k="${k}" class="loto"><option value="">— situação —</option><option ${v==='OK'?'selected':''}>OK</option><option ${v==='NÃO APLICÁVEL'?'selected':''}>NÃO APLICÁVEL</option><option ${v==='NÃO ATENDIDO'?'selected':''}>NÃO ATENDIDO</option></select></div></div>`}).join("");
- document.querySelectorAll(".loto").forEach(sel=>sel.onchange=()=>{if(sel.value)S.loto[sel.dataset.k]=sel.value;else delete S.loto[sel.dataset.k];renderLoto();save()})}
+ <select data-k="${k}" class="loto"><option value="">— situação —</option><option ${v==='OK'?'selected':''}>OK</option><option ${v==='NÃO APLICÁVEL'?'selected':''}>NÃO APLICÁVEL</option><option ${v==='NÃO ATENDIDO'?'selected':''}>NÃO ATENDIDO</option></select>${v==='NÃO APLICÁVEL'?`<textarea class="lotoj" data-k="J${i}" placeholder="Justifique por que este passo não se aplica (obrigatório)">${esc(S.loto["J"+i]||"")}</textarea>`:""}</div></div>`}).join("");
+ document.querySelectorAll(".loto").forEach(sel=>sel.onchange=()=>{if(sel.value)S.loto[sel.dataset.k]=sel.value;else delete S.loto[sel.dataset.k];renderLoto();save()});document.querySelectorAll(".lotoj").forEach(t=>t.oninput=()=>{S.loto[t.dataset.k]=t.value;scheduleSave()})}
 /* ===== CHECKLIST ===== */
 function ui(){S.ui=S.ui||{};if(S.ui.autoPlan===undefined)S.ui.autoPlan=true;S.ui.closed=S.ui.closed||{};return S.ui}
 function normStats(n){const t=DB[n].length;let a=0,nc=0;DB[n].forEach((r,i)=>{const it=S.items[n+"_"+i];if(it&&it.status){a++;if(it.status==="NÃO CONFORME")nc++}});return{t,a,nc}}
@@ -724,10 +756,18 @@ function renderBlqList(){
 }
 function download(name,blob){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
 function safeName(s){return String(s||"campo").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\w\-]+/g,"_").slice(0,60)}
+function printBlq(){
+ if(!S.blq.length)return alert("Adicione ao menos um ponto de bloqueio antes de imprimir.");
+ const kv2=[["Instalação",$("blqLocal").value],["Data",fmtDate($("blqData").value)],["Responsável",$("blqResp").value],["Contratada",$("blqContratada").value],["Planta / Fase",$("blqPlanta").value+" / "+$("blqFase").value]];
+ const hd=["Equipamento","Ponto de bloqueio","Tensão","Função","Local do equip.","Local do bloqueio","Bloq. principal","Bloq. complementar","Compl. obrig.","Gaveta","Obs."];
+ $("blqPrint").innerHTML=`<h2 style="margin:0 0 8px">Matriz de Bloqueio — PRO-045524 (Anexo 2)</h2><table>${kv2.map(([k,v])=>`<tr><th style="width:25%">${esc(k)}</th><td>${esc(v)||"—"}</td></tr>`).join("")}</table><table style="margin-top:8px"><tr>${hd.map(x=>`<th>${x}</th>`).join("")}</tr>${S.blq.map(b=>`<tr>${[b.equip,b.ponto,b.tensao,b.funcao,b.localEquip,b.localBloq,b.principal,b.complementar,b.compObrig,b.gaveta,b.obs].map(v=>`<td>${esc(v)||"—"}</td>`).join("")}</tr>`).join("")}</table>`;
+ document.body.classList.add("pb");
+ const end=()=>{document.body.classList.remove("pb");window.removeEventListener("afterprint",end)};
+ window.addEventListener("afterprint",end);setTimeout(()=>window.print(),100)}
 function exportBlqCSV(){
  if(!S.blq.length)return alert("Adicione ao menos um ponto de bloqueio antes de exportar.");
  const hd=[$("blqLocal").value,fmtDate($("blqData").value),$("blqResp").value,$("blqContratada").value,$("blqPlanta").value,$("blqFase").value];
- const csvEsc=v=>{const s=String(v??"");return /[",;\n\r]/.test(s)?('"'+s.replace(/"/g,'""')+'"'):s};
+ const csvEsc=v=>{let s=String(v??"");if(/^[=+\-@]/.test(s))s="'"+s;return /[",;\n\r]/.test(s)?('"'+s.replace(/"/g,'""')+'"'):s};
  const rows=[BLQ_HEADERS.map(csvEsc).join(";")];
  S.blq.forEach(b=>rows.push(hd.concat([b.equip,b.ponto,b.tensao,b.funcao,b.localEquip,b.localBloq,b.principal,b.complementar,b.compObrig,b.gaveta,b.obs]).map(csvEsc).join(";")));
  download("matriz_bloqueio_"+safeName($("blqLocal").value)+".csv",new Blob(["\uFEFF"+rows.join("\r\n")],{type:"text/csv;charset=utf-8"}));
@@ -762,7 +802,7 @@ function ncList(st){const out=[];Object.keys(DB).forEach(n=>orderedKeys(n).forEa
   adeq:row[2]||("Adequar conforme "+row[1]+" — detalhar a solução técnica em campo."),foto:hasPhoto(it.photoIdx)?Number(it.photoIdx):null})}));
  return out.sort((a,b)=>(critOf(b).c==="red")-(critOf(a).c==="red"))}
 function codeMap(){const m={};ncList("NÃO CONFORME").forEach((o,j)=>m[o.k]="NC-"+pad2(j+1));ncList("ATENÇÃO").forEach((o,j)=>m[o.k]="ATN-"+pad2(j+1));return m}
-function docNumber(){const v=$("docNum").value.trim();if(v)return v;const d=($("data").value||todayISO()).replace(/-/g,"");return "DIAG-"+d+"-"+(safeName($("local").value).toUpperCase().slice(0,20)||"SEM-TAG")}
+function docNumber(){const v=$("docNum").value.trim();if(v)return v;const d=($("data").value||todayISO()).replace(/-/g,"");const tag=$("local").value.trim()?safeName($("local").value).toUpperCase().slice(0,20):"SEM-TAG";S.meta=S.meta||{};if(!S.meta.docT){const n=new Date();S.meta.docT=pad2(n.getHours())+pad2(n.getMinutes())}return "DIAG-"+d+"-"+tag+"-"+S.meta.docT}
 /* ===== AUDITORIA ===== */
 function audit(){const L=[],x=counts(),add=(lvl,txt)=>L.push({lvl,txt});
  if(!x.ev)add("b","Nenhum item de checklist foi avaliado — o relatório não tem base para conclusão.");
@@ -778,8 +818,12 @@ function audit(){const L=[],x=counts(),add=(lvl,txt)=>L.push({lvl,txt});
  (REC[$("tipo").value]||[]).forEach(n=>{const c=normCounts(n);if(c.ev<c.t)add("w",`${NORMS[n]} (recomendada para “${$("tipo").value}”): ${c.t-c.ev} de ${c.t} itens não avaliados.`)});
  if($("tipo").value==="Não identificado")add("w","Tipo de instalação não identificado — não foi possível verificar a cobertura mínima de normas.");
  const semCal=S.med.filter(m=>m.cal!=="Sim");if(semCal.length)add("w",`${semCal.length} medição(ões) sem calibração do instrumento comprovada — valores sem rastreabilidade metrológica.`);
- if($("intervencao").value.startsWith("Sim — trabalho desenergizado")){const bad=LOTO.map((s,i)=>({s,v:S.loto["L"+i]})).filter(o=>o.v!=="OK"&&o.v!=="NÃO APLICÁVEL");
-  if(bad.length)add("b",`Intervenção desenergizada declarada, mas ${bad.length} dos 6 passos não estão “OK” (${bad.map(o=>o.s[0]).join(", ")}). Pela NR-10 10.5.1 / PRO-041951 item 9 o circuito não pode ser considerado desenergizado.`)}
+ if($("intervencao").value.startsWith("Sim — trabalho desenergizado")){
+  const st=LOTO.map((s,i)=>({s,i,v:S.loto["L"+i]}));
+  const bad=st.filter(o=>o.v!=="OK"&&!(o.i>=3&&o.v==="NÃO APLICÁVEL"));
+  if(bad.length)add("b",`Intervenção desenergizada declarada, mas ${bad.length} dos 6 passos não estão “OK” (${bad.map(o=>o.s[0]).join(", ")}). Seccionamento, bloqueio e constatação de ausência de tensão não admitem “Não aplicável”. Pela NR-10 10.5.1 / PRO-041951 item 9 o circuito não pode ser considerado desenergizado.`);
+  const semJ=st.filter(o=>o.v==="NÃO APLICÁVEL"&&!(S.loto["J"+o.i]||"").trim());
+  if(semJ.length)add("b",`Passo(s) marcado(s) “Não aplicável” sem justificativa: ${semJ.map(o=>o.s[0]).join(", ")}.`)}
  if($("intervencao").value.includes("energizado (exige")){const it=S.items["NR10_4"];if(!it||it.status!=="CONFORME")add("b","Trabalho energizado declarado sem o item “Procedimento específico + ART” (NR-10 10.6) marcado como conforme.")}
  const semFonte=S.costs.filter(c=>!c.fonte.trim());if(semFonte.length)add("w",`${semFonte.length} custo(s) sem fonte de preço informada.`);
  const orphan=S.actions.filter(a=>a.src&&!(S.items[a.src]&&["NÃO CONFORME","ATENÇÃO"].includes(S.items[a.src].status)));
@@ -830,7 +874,7 @@ function buildReport(){
   ${AT.length?`<h3 style="color:#b54708">5.2 Pontos de atenção (${AT.length})</h3>`+AT.map(o=>ncCard(o,cm[o.k])).join(""):""}`:`<h2>5. Não conformidades e pontos de atenção</h2><p>Não foram registradas não conformidades nem pontos de atenção nos itens avaliados.</p>`;
  const P=allItems().filter(o=>o.st.startsWith("PENDENTE"));
  const s6=P.length?`<h2>6. Pendências de verificação</h2><table><tr><th>Checklist</th><th>Requisito</th><th>Tipo</th><th>O que falta</th></tr>${P.map(o=>`<tr><td>${esc(NORMS[o.n])}</td><td>${esc(o.r[0])}<div class="muted">${esc(o.r[1])}</div></td><td>${o.st==="PENDENTE DE CAMPO"?"Campo":"Documentação"}</td><td>${esc(o.it.just)||'<span class="noev">não descrito</span>'}</td></tr>`).join("")}</table>`:"";
- const s7=Object.keys(S.loto).length?`<h2>7. Seis passos da desenergização (NR-10 10.5.1 / RAC 04)</h2><table><tr><th>#</th><th>Passo</th><th>Ref.</th><th>Situação</th></tr>${LOTO.map((s,i)=>{const v=S.loto["L"+i]||"não registrado";return `<tr><td>${i+1}</td><td>${esc(s[0])}</td><td>${esc(s[2])}</td><td><span class="tag ${v==='OK'?'green':v==='NÃO APLICÁVEL'?'gray':'red'}">${esc(v)}</span></td></tr>`}).join("")}</table>`:"";
+ const s7=Object.keys(S.loto).length?`<h2>7. Seis passos da desenergização (NR-10 10.5.1 / RAC 04)</h2><table><tr><th>#</th><th>Passo</th><th>Ref.</th><th>Situação</th></tr>${LOTO.map((s,i)=>{const v=S.loto["L"+i]||"não registrado";return `<tr><td>${i+1}</td><td>${esc(s[0])}</td><td>${esc(s[2])}</td><td><span class="tag ${v==='OK'?'green':v==='NÃO APLICÁVEL'?'gray':'red'}">${esc(v)}</span>${v==='NÃO APLICÁVEL'&&(S.loto["J"+i]||"").trim()?`<br><span class="muted">Justificativa: ${esc(S.loto["J"+i])}</span>`:""}</td></tr>`}).join("")}</table>`:"";
  const s8=S.med.length?`<h2>8. Medições realizadas</h2><table><tr><th>Grandeza</th><th>Ponto</th><th>Valor</th><th>Instrumento</th><th>Calibração</th><th>Obs./fonte</th></tr>${S.med.map(m=>`<tr><td>${esc(m.g)}</td><td>${esc(m.ponto)||"—"}</td><td><b>${esc(m.v)} ${esc(m.un)}</b></td><td>${esc(m.inst)} ${esc(m.mod)}${m.ser?" • S/N "+esc(m.ser):""}${m.cat?" • "+esc(m.cat):""}</td><td>${m.cal==="Sim"?'<span class="tag green">Válida</span>':'<span class="tag yellow">'+esc(m.cal)+'</span>'}</td><td>${esc(m.obs)||"—"}</td></tr>`).join("")}</table><p class="muted">Valores registrados como medidos/documentados em campo. Medições sem calibração comprovada não devem ser usadas como evidência conclusiva.</p>`:"";
  const s9=avaliadas.length?`<h2>9. Checklist completo por norma / PNR</h2>${avaliadas.map(norm=>{const rows=allItems().filter(o=>o.n===norm);
   return `<h3>${esc(NORMS[norm])}</h3><table><tr><th style="width:4%">#</th><th>Requisito</th><th style="width:16%">Referência</th><th style="width:15%">Situação</th><th>Evidência</th></tr>${rows.map(o=>`<tr><td>${o.i+1}</td><td>${esc(o.r[0])}</td><td>${esc(o.r[1])}</td><td><span class="tag ${tagcls(o.st)}">${esc(o.st)}</span>${cm[o.k]?`<br><b>${cm[o.k]}</b>`:""}</td><td>${esc(o.it.just||"—")}${hasPhoto(o.it.photoIdx)?" (Foto "+(Number(o.it.photoIdx)+1)+")":""}</td></tr>`).join("")}</table>`}).join("")}`:"";
@@ -850,10 +894,10 @@ function buildReport(){
  const sign=`<h2>16. Responsabilidade</h2><div class="sign"><div>${esc($("resp").value)||"Responsável pela inspeção"}${$("matricula").value?"<br>Matr. "+esc($("matricula").value):""}${$("crea").value?"<br>"+esc($("crea").value):""}<br><b>Elaborado por</b></div><div><br><br><b>Revisado / aprovado por</b></div></div>`;
  const foot=`<div class="rp-foot">${esc(dn)} • Rev. 0 • Gerado pelo DiagElétrica Vale v${APP_VER} em ${new Date().toLocaleString("pt-BR")}. Base normativa: NR-10, NR-06, ABNT NBR 5410, NBR 14039, NBR 5419, NBR 5460 e PNR Vale (000031/000051/000052/000053/000068/000069/000080/000131/000138/000149/000188/000222) — RAC 10 / PRO-041951. Confirme a revisão vigente das normas na unidade antes de decisões técnicas.</div>`;
  $("report").innerHTML=`<div class="rp">${head}${s1}${s2}${s3}${s4}${s5}${s6}${s7}${s8}${s9}${s10}${s11}${s12}${s13}${s14}${s15}${sign}${foot}</div>`;
- renderAudit();renderSent()}
+ renderAudit();renderSent();renderSheets()}
 /* ===== ENVIO (v4.1 — envio direto com relatório anexado) ===== */
 const EMAIL_RE=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-function isMobile(){return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)}
+function isMobile(){return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1)}
 function markSent(kind){S.meta=S.meta||{};S.meta.sentAt=new Date().toISOString();S.meta.sentKind=kind;save();renderSent()}
 function renderSent(){const m=S.meta||{};$("sentInfo").textContent=m.sentAt?`✓ Último ${m.sentKind} gerado em ${new Date(m.sentAt).toLocaleString("pt-BR")}.`:""}
 function blockers(){return audit().filter(o=>o.lvl==="b")}
@@ -902,7 +946,7 @@ async function doShare(p){
  window._pendingShare=null;markSent("e-mail");updateSendBtn();
  try{await navigator.clipboard.writeText(p.to)}catch(_){}
  $("sendHint").innerHTML=`✓ Relatório compartilhado. Se o destinatário não veio preenchido, cole <b>${esc(p.to)}</b> (já copiado) no campo <b>Para</b> e envie.`}
-async function sendReport(){
+async function sendReport(){if(!needSheets())return;
  const e=$("email").value.trim();
  if(!EMAIL_RE.test(e)){alert("Digite um e-mail de destino válido.");$("email").focus();return}
  /* 2º toque após o celular exigir novo gesto do usuário para compartilhar */
@@ -925,18 +969,74 @@ function fallbackEML(p){
  $("sendHint").innerHTML=`✓ E-mail preparado e baixado (<b>${esc(p.attName.replace(/\.html$/,".eml"))}</b>). <b>Abra o arquivo baixado</b>: o Outlook mostra a mensagem pronta para <b>${esc(p.to)}</b>, com o relatório anexado — confira e clique em <b>Enviar</b>.<br><span class="muted">Se o seu Outlook abrir a mensagem só para leitura, use <b>Encaminhar</b> e envie para o mesmo destinatário.</span>`}
 $("email").addEventListener("input",()=>{window._pendingShare=null;updateSendBtn()});
 /* alternativa: resumo em texto via mailto (sem anexo) */
-function sendMail(){const e=$("email").value.trim();if(!EMAIL_RE.test(e))return alert("Digite um e-mail válido.");
+function sendMail(){if(!needSheets())return;const e=$("email").value.trim();if(!EMAIL_RE.test(e))return alert("Digite um e-mail válido.");
  const m=mailSummary();let txt=m.text;
  if(txt.length>1700)txt=txt.slice(0,1650)+"…\n(lista completa no relatório anexo)";
  txt+="\n\nObservação: anexe o relatório (PDF) antes de enviar.";
  markSent("e-mail (resumo)");location.href=`mailto:${e}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(txt)}`}
-function printReport(){buildReport();const b=blockers();
+function printReport(){if(!needSheets())return;buildReport();const b=blockers();
  if(b.length&&!confirm(`Há ${b.length} inconsistência(s) bloqueante(s) na verificação (item 9):\n\n- ${b.map(o=>o.txt).join("\n- ")}\n\nGerar o PDF mesmo assim? Elas constarão como limitação no relatório.`))return;
  markSent("PDF");setTimeout(()=>window.print(),150)}
 function exportJSON(){const data={app:"DiagEletricaVale",ver:APP_VER,doc:docNumber(),exportedAt:new Date().toISOString(),fields:Object.fromEntries(FIELD_IDS.map(id=>[id,$(id)?$(id).value:""])),S};
  download("diag_eletrica_"+safeName(docNumber())+".json",new Blob([JSON.stringify(data,null,2)],{type:"application/json"}))}
+/* ===== XLSX (gerador mínimo, sem bibliotecas) + ENVIO AO GOOGLE SHEETS ===== */
+const _crcT=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(b){let c=-1;for(let i=0;i<b.length;i++)c=_crcT[(c^b[i])&255]^(c>>>8);return(c^-1)>>>0}
+function zipStore(files){const enc=new TextEncoder(),parts=[],cd=[];let off=0;
+ files.forEach(f=>{const n=enc.encode(f.name),d=enc.encode(f.data),crc=crc32(d);
+  const l=new DataView(new ArrayBuffer(30));l.setUint32(0,0x04034b50,true);l.setUint16(4,20,true);l.setUint16(6,0x0800,true);l.setUint16(12,0x21,true);l.setUint32(14,crc,true);l.setUint32(18,d.length,true);l.setUint32(22,d.length,true);l.setUint16(26,n.length,true);
+  parts.push(new Uint8Array(l.buffer),n,d);
+  const c=new DataView(new ArrayBuffer(46));c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint16(8,0x0800,true);c.setUint16(14,0x21,true);c.setUint32(16,crc,true);c.setUint32(20,d.length,true);c.setUint32(24,d.length,true);c.setUint16(28,n.length,true);c.setUint32(42,off,true);
+  cd.push(new Uint8Array(c.buffer),n);off+=30+n.length+d.length});
+ const sz=cd.reduce((a,x)=>a+x.length,0),e=new DataView(new ArrayBuffer(22));e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,sz,true);e.setUint32(16,off,true);
+ return new Blob([...parts,...cd,new Uint8Array(e.buffer)],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})}
+function colName(i){let s="";i++;while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26)}return s}
+function xe(s){return String(s??"").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]))}
+function sheetXml(rows){return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+rows.map((r,ri)=>'<row r="'+(ri+1)+'">'+r.map((v,ci)=>{const ref=colName(ci)+(ri+1);return(typeof v==="number"&&isFinite(v))?'<c r="'+ref+'"><v>'+v+'</v></c>':'<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+xe(v)+'</t></is></c>'}).join("")+'</row>').join("")+'</sheetData></worksheet>'}
+function buildXlsx(){const x=counts(),cm=codeMap(),dn=docNumber(),V=id=>$(id).value;
+ const resumo=[["Campo","Valor"],["Documento",dn],["Emissão (ISO)",new Date().toISOString()],["Versão do app",APP_VER],["Unidade / Site",V("cliente")],["Local / TAG",V("local")],["Tipo de instalação",V("tipo")],["Nível de tensão",V("tensao")],["Origem do dado de tensão",V("fonteT")],["Data da inspeção",fmtDate(V("data"))],["Contrato / OS-OM",V("contrato")],["Fiscal / Responsável",V("resp")],["Matrícula",V("matricula")],["CREA",V("crea")],["Intervenção (RAC 10)",V("intervencao")],["Conformes",x.c],["Não conformes",x.n],["Atenção",x.at],["Pendentes",x.p],["Não aplicáveis",x.na],["Índice de conformidade (%)",x.idx===null?"":x.idx],["Fotos registradas",S.photos.length],["Observações gerais",V("obs")]];
+ const chk=[["Checklist","#","Requisito","Referência","Situação","Código","Motivo / evidência","Foto nº"]].concat(allItems().map(o=>[NORMS[o.n],o.i+1,o.r[0],o.r[1],o.st,cm[o.k]||"",o.it.just||"",hasPhoto(o.it.photoIdx)?Number(o.it.photoIdx)+1:""]));
+ const plano=[["Origem","Item","Prioridade","Adequação proposta","Referência","Fonte"]].concat(S.actions.map(a=>[a.src&&cm[a.src]?cm[a.src]:"Manual",a.item,a.pri,a.desc,a.ref,a.fonte]));
+ const med=[["Grandeza","Ponto","Valor","Unidade","Instrumento","Modelo","Nº série","Categoria","Calibração válida","Observação"]].concat(S.med.map(m=>[m.g,m.ponto,Number(m.v),m.un,m.inst,m.mod,m.ser,m.cat,m.cal,m.obs]));
+ const hd=[V("blqLocal"),fmtDate(V("blqData")),V("blqResp"),V("blqContratada"),V("blqPlanta"),V("blqFase")];
+ const blq=[BLQ_HEADERS].concat(S.blq.map(b=>hd.concat([b.equip,b.ponto,b.tensao,b.funcao,b.localEquip,b.localBloq,b.principal,b.complementar,b.compObrig,b.gaveta,b.obs])));
+ const lot=[["#","Passo","Referência","Situação","Justificativa (N/A)"]].concat(LOTO.map((s,i)=>[i+1,s[0],s[2],S.loto["L"+i]||"não registrado",S.loto["J"+i]||""]));
+ const cost=[["Item","Qtd","Unidade","Preço unit. (R$)","Total (R$)","Fonte do preço"]].concat(S.costs.map(c=>[c.item,c.q,c.un,c.pu,c.q*c.pu,c.fonte]));
+ const sh=[["Resumo",resumo],["Checklist",chk],["Plano",plano],["Medições",med],["Bloqueio",blq],["6 Passos",lot],["Custos",cost]];
+ const H='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',R="http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+ const files=[{name:"[Content_Types].xml",data:H+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+sh.map((s,i)=>'<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join("")+'</Types>'},
+  {name:"_rels/.rels",data:H+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="'+R+'/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+  {name:"xl/workbook.xml",data:H+'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="'+R+'"><sheets>'+sh.map((s,i)=>'<sheet name="'+xe(s[0])+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join("")+'</sheets></workbook>'},
+  {name:"xl/_rels/workbook.xml.rels",data:H+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sh.map((s,i)=>'<Relationship Id="rId'+(i+1)+'" Type="'+R+'/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join("")+'</Relationships>'}]
+  .concat(sh.map((s,i)=>({name:"xl/worksheets/sheet"+(i+1)+".xml",data:sheetXml(s[1])})));
+ return zipStore(files)}
+function b64bytes(u8){let s="";for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s)}
+function sigState(){const t=JSON.stringify([S.items,S.med,S.actions,S.costs,S.loto,S.blq,FIELD_IDS.slice(0,13).map(id=>$(id).value)]);let x=5381;for(let i=0;i<t.length;i++)x=((x<<5)+x+t.charCodeAt(i))|0;return x}
+function sheetsOk(){return !SHEETS_URL||!!(S.meta&&S.meta.sheetsSig===sigState())}
+function needSheets(){if(!SHEETS_GATE_DELIVERY||sheetsOk())return true;alert("Envio obrigatório pendente: envie primeiro o relatório (.xlsx) para o Google Sheets (seção 10).");return false}
+function renderSheets(){const bx=$("sheetsBox"),bt=$("sheetsBtn");if(!bx)return;
+ if(!SHEETS_URL){bx.className="notice";bx.innerHTML="⚙️ Envio ao Google Sheets <b>não configurado</b> (defina SHEETS_URL no início do script). Enquanto isso, PDF e e-mail seguem liberados.";bt.textContent="📤 Enviar relatório (.xlsx)";return}
+ const m=S.meta||{};
+ if(m.sheetsAt&&m.sheetsSig===sigState()){bx.className="safe";bx.innerHTML="✓ Relatório enviado em <b>"+esc(new Date(m.sheetsAt).toLocaleString("pt-BR"))+"</b>.";bt.textContent="📤 Reenviar relatório (.xlsx)"}
+ else{bx.className="danger";bx.innerHTML=m.sheetsAt?"⛔ Houve <b>alterações após o último envio</b>. Reenvie o relatório para liberar PDF, e-mail e a finalização.":"⛔ <b>Envio obrigatório pendente.</b> Envie o relatório (.xlsx) para liberar PDF, e-mail e a finalização da inspeção.";bt.textContent="📤 Enviar relatório (.xlsx) — obrigatório"}}
+async function sendSheets(){
+ if(!SHEETS_URL)return alert("Envio não configurado: defina SHEETS_URL e SHEETS_TOKEN no início do script.");
+ const b=blockers();
+ if(b.length&&!confirm(`Há ${b.length} inconsistência(s) bloqueante(s) na verificação (item 9):\n\n- ${b.map(o=>o.txt).join("\n- ")}\n\nEnviar mesmo assim?`))return;
+ const btn=$("sheetsBtn");btn.disabled=true;btn.textContent="Enviando…";
+ try{
+  const dn=docNumber(),m=mailSummary(),x=counts(),u8=new Uint8Array(await buildXlsx().arrayBuffer());
+  const body=JSON.stringify({token:SHEETS_TOKEN,doc:dn,to:$("email").value.trim(),subject:m.subject,message:$("emailMsg").value,filename:"Relatorio_"+safeName(dn)+".xlsx",xlsx:b64bytes(u8),
+   resumo:{unidade:$("cliente").value,local:$("local").value,data:fmtDate($("data").value),resp:$("resp").value,c:x.c,nc:x.n,atn:x.at,p:x.p,na:x.na,fotos:S.photos.length}});
+  const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),60000);
+  const r=await fetch(SHEETS_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body,signal:ctl.signal});clearTimeout(t);
+  const j=await r.json();if(!j||j.ok!==true)throw new Error((j&&j.error)||"resposta inválida do servidor");
+  S.meta=S.meta||{};S.meta.sheetsAt=new Date().toISOString();S.meta.sheetsSig=sigState();S.meta.sheetsRef=j.ref||"";markSent("Google Sheets (.xlsx)");
+  alert(j.emailErro?"✓ Relatório salvo no Google, mas o e-mail automático falhou: "+j.emailErro:"✓ Relatório enviado com sucesso.");
+ }catch(err){alert("Falha no envio: "+(err.name==="AbortError"?"tempo esgotado":err.message)+".\nVerifique a conexão e tente novamente. O relatório continua salvo no aparelho.")}
+ finally{btn.disabled=false;renderSheets()}}
 /* ===== FINALIZAR E LIMPAR ===== */
-function finishClean(){
+function finishClean(){if(!sheetsOk()){alert("Envio obrigatório pendente: envie o relatório (.xlsx) para o Google Sheets antes de finalizar e limpar.");return}
  const m=S.meta||{};
  const head=m.sentAt?`Relatório registrado (${m.sentKind}) em ${new Date(m.sentAt).toLocaleString("pt-BR")}.`:"⚠️ ATENÇÃO: não há registro de geração de PDF nem de envio por e-mail desta inspeção.";
  if(!confirm(head+"\n\nApagar deste aparelho TODOS os dados da inspeção atual (checklist, fotos, medições, 6 passos, matriz de bloqueio, plano e custos)?\n\nDica: exporte o .json antes se quiser guardar uma cópia."))return;
@@ -945,6 +1045,18 @@ function finishClean(){
  fields.data=todayISO();
  hardReset({S:freshState(),fields,ts:new Date().toISOString(),ver:APP_VER,cleaned:true});
 }
+/* ===== RESTAURAR BACKUP (.json) ===== */
+async function restoreBackup(d){
+ const photos=(Array.isArray(d.S.photos)?d.S.photos:[]).map(p=>({name:String((p&&p.name)||"foto"),ts:(p&&p.ts)||"",url:(p&&typeof p.url==="string"&&p.url.startsWith("data:image/"))?p.url:""}));
+ let ok=true;try{await idbSet("photos",photos)}catch(_){ok=false}
+ const Sx=Object.assign(freshState(),d.S,{photos:ok?photos.map(p=>({name:p.name,ts:p.ts})):photos});
+ hardReset({S:Sx,fields:d.fields||{},ts:new Date().toISOString(),ver:APP_VER},true)}
+$("importBtn").onclick=()=>$("importFile").click();
+$("importFile").onchange=e=>{const f=e.target.files[0];e.target.value="";if(!f)return;
+ const r=new FileReader();
+ r.onload=()=>{let d;try{d=JSON.parse(r.result);if(!d||d.app!=="DiagEletricaVale"||!d.S||typeof d.S!=="object")throw new Error("formato")}catch(_){return alert("Arquivo inválido: use um .json exportado por este aplicativo.")}
+  if(confirm("Restaurar este backup? Os dados atuais deste aparelho serão substituídos."))restoreBackup(d)};
+ r.onerror=()=>alert("Não foi possível ler o arquivo.");r.readAsText(f)};
 /* ===== INIT ===== */
 (function init(){
  const saved=loadSaved();
@@ -960,6 +1072,9 @@ function finishClean(){
  ui();if(!DB[S.norm])S.norm="NR10";
  renderTabs();renderChecklist();renderLoto();renderPhotos();renderMed();renderActions();renderCosts();renderBlqList();renderResult();renderSent();updateSendBtn();
  save();
+
+ if(S.photos.some(p=>p&&p.url))_pv=1;
+ idbGet("photos").then(arr=>{_idbState="ok";if(Array.isArray(arr))S.photos.forEach((p,i)=>{if(p&&!p.url&&arr[i]&&arr[i].url)p.url=arr[i].url});renderPhotos()},()=>{_idbState="fail";const el=$("saveStatus");if(el)el.textContent="⚠️ IndexedDB indisponível: fotos ficam no armazenamento comum (limite menor). Exporte o .json com frequência."});
 })();
 </script>
 </body>
