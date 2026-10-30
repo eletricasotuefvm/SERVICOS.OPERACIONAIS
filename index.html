@@ -153,7 +153,7 @@ body{padding-bottom:calc(82px + env(safe-area-inset-bottom,0px))}
 </head>
 <body>
 <header class="top">
-  <h1>⚡ DiagElétrica Vale <span class="badge">v4.3</span></h1>
+  <h1>⚡ DiagElétrica Vale <span class="badge">v4.4</span></h1>
   <p>Relatório de campo p/ adequações elétricas • NR-10 • NBR 5410/5419 • PNR Vale • RAC 10 (PRO-041951)</p>
   <p id="saveStatus" style="font-size:10.5px;margin:3px 0 0;color:#d7f0ef"></p>
 </header>
@@ -397,7 +397,7 @@ body{padding-bottom:calc(82px + env(safe-area-inset-bottom,0px))}
 </nav>
 <script>
 /* ================= ESTADO ================= */
-const APP_VER="4.3";
+const APP_VER="4.4";
 function freshState(){return{norm:"NR10",items:{},photos:[],med:[],actions:[],costs:[],loto:{},blq:[],ui:{autoPlan:true,closed:{}},meta:{}}}
 const S=freshState();
 const STORAGE_KEY="diagEletricaVale_v2_state";
@@ -1009,7 +1009,7 @@ function buildXlsx(){const x=counts(),cm=codeMap(),dn=docNumber(),V=id=>$(id).va
   {name:"xl/workbook.xml",data:H+'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="'+R+'"><sheets>'+sh.map((s,i)=>'<sheet name="'+xe(s[0])+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join("")+'</sheets></workbook>'},
   {name:"xl/_rels/workbook.xml.rels",data:H+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sh.map((s,i)=>'<Relationship Id="rId'+(i+1)+'" Type="'+R+'/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join("")+'</Relationships>'}]
   .concat(sh.map((s,i)=>({name:"xl/worksheets/sheet"+(i+1)+".xml",data:sheetXml(s[1])})));
- return zipStore(files)}
+ window._lastSheets=sh;return zipStore(files)}
 function b64bytes(u8){let s="";for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s)}
 function sigState(){const t=JSON.stringify([S.items,S.med,S.actions,S.costs,S.loto,S.blq,FIELD_IDS.slice(0,13).map(id=>$(id).value)]);let x=5381;for(let i=0;i<t.length;i++)x=((x<<5)+x+t.charCodeAt(i))|0;return x}
 function sheetsOk(){return !SHEETS_URL||!!(S.meta&&S.meta.sheetsSig===sigState())}
@@ -1026,7 +1026,7 @@ async function sendSheets(){
  const btn=$("sheetsBtn");btn.disabled=true;btn.textContent="Enviando…";
  try{
   const dn=docNumber(),m=mailSummary(),x=counts(),u8=new Uint8Array(await buildXlsx().arrayBuffer());
-  const body=JSON.stringify({token:SHEETS_TOKEN,doc:dn,to:$("email").value.trim(),subject:m.subject,message:$("emailMsg").value,filename:"Relatorio_"+safeName(dn)+".xlsx",xlsx:b64bytes(u8),
+  const body=JSON.stringify({token:SHEETS_TOKEN,doc:dn,to:$("email").value.trim(),subject:m.subject,message:$("emailMsg").value,filename:"Relatorio_"+safeName(dn)+".xlsx",xlsx:b64bytes(u8),tabelas:Object.fromEntries((window._lastSheets||[]).map(s=>[s[0],s[1]])),
    resumo:{unidade:$("cliente").value,local:$("local").value,data:fmtDate($("data").value),resp:$("resp").value,c:x.c,nc:x.n,atn:x.at,p:x.p,na:x.na,fotos:S.photos.length}});
   const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),60000);
   const r=await fetch(SHEETS_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body,signal:ctl.signal});clearTimeout(t);
